@@ -8,8 +8,8 @@ import pandas as pd
 import streamlit as st
 from streamlit_calendar import calendar
 
-from scheduler import DAY_KEYS, DAY_LABELS, Employee, Shift, build_week, generate_schedule
-from storage import authenticate, create_leave_request, create_store, init_db, list_leave_requests, list_stores, load_employees, load_latest_schedule, review_leave_request, save_employees, save_schedule
+from scheduler import DAY_KEYS, DAY_LABELS, Employee, Shift, audit_schedule, build_week, generate_schedule
+from storage import authenticate, create_leave_request, create_store, create_swap_request, init_db, list_leave_requests, list_stores, list_swap_requests, load_employees, load_latest_schedule, review_leave_request, review_swap_request, save_employees, save_schedule
 
 
 st.set_page_config(page_title="Shiftwise 智慧排班", page_icon="✦", layout="wide", initial_sidebar_state="expanded")
@@ -279,6 +279,37 @@ def render_leave_workflow(user: dict[str, object]) -> None:
                 review_leave_request(request["id"], str(user["username"]), "rejected")
                 st.rerun()
 
+    st.markdown('<div class="section-title">換班申請</div>', unsafe_allow_html=True)
+    swap_requests = list_swap_requests(int(user["store_id"]))
+    if user["role"] == "staff" and employees:
+        with st.form("swap_request_form", border=True):
+            from_employee = employees[0]
+            st.text_input("原員工", value=from_employee, disabled=True)
+            to_options = [employee for employee in employees if employee != from_employee]
+            to_employee = st.selectbox("希望換班員工", to_options or employees)
+            shift_date = st.date_input("班次日期", value=date.today(), key="swap_date")
+            shift_name = st.text_input("班別", value="早班", key="swap_shift")
+            swap_reason = st.text_input("換班原因", placeholder="例如：家庭行程", key="swap_reason")
+            if st.form_submit_button("送出換班申請", width="stretch"):
+                if not swap_reason.strip():
+                    st.error("請填寫換班原因。")
+                else:
+                    create_swap_request(int(user["store_id"]), str(user["username"]), from_employee, to_employee, shift_date.isoformat(), shift_name, swap_reason.strip())
+                    st.success("換班申請已送出。")
+                    st.rerun()
+    visible_swaps = swap_requests if user["role"] in {"admin", "manager"} else [item for item in swap_requests if item["requester"] == user["username"]]
+    for request in visible_swaps:
+        status_label = {"pending": "待審核", "approved": "已核准", "rejected": "已拒絕"}.get(request["status"], request["status"])
+        st.markdown(f"**{escape(request['shift_date'])} {escape(request['shift_name'])}** · {escape(request['from_employee'])} → {escape(request['to_employee'])} · {status_label}  \\n原因：{escape(request['reason'])}")
+        if user["role"] in {"admin", "manager"} and request["status"] == "pending":
+            approve_col, reject_col = st.columns(2)
+            if approve_col.button("核准換班", key=f"approve_swap_{request['id']}", type="primary", width="stretch"):
+                review_swap_request(request["id"], str(user["username"]), "approved")
+                st.rerun()
+            if reject_col.button("拒絕換班", key=f"reject_swap_{request['id']}", width="stretch"):
+                review_swap_request(request["id"], str(user["username"]), "rejected")
+                st.rerun()
+
 
 def token_set(value: object, mapping: dict[str, str] | None = None) -> set[str]:
     values = {item.strip() for item in str(value).replace("，", ",").split(",") if item.strip()}
@@ -347,7 +378,7 @@ def render_dashboard_overview(schedule: pd.DataFrame, gaps: list[dict[str, str]]
     st.markdown(f'<div class="alert-panel"><strong>營運提醒</strong><span>{escape(alert_text)}</span></div>', unsafe_allow_html=True)
 
 
-def render_health_panel(schedule: pd.DataFrame, gaps: list[dict[str, str]], max_hours: float, absences: list[dict[str, str]]) -> None:
+def render_health_panel(schedule: pd.DataFrame, gaps: list[dict[str, str]], max_hours: float, absences: list[dict[str, str]], violations: list[dict[str, str]]) -> None:
     overtime_count = 0
     if not schedule.empty:
         overtime_count = int((schedule.groupby("employee")["hours"].sum() > max_hours).sum())
@@ -359,6 +390,7 @@ def render_health_panel(schedule: pd.DataFrame, gaps: list[dict[str, str]], max_
         ("需求覆蓋", "正常" if not gaps else f"{len(gaps)} 個缺口", not gaps),
         ("工時限制", "正常" if not overtime_count else f"{overtime_count} 人超時", not overtime_count),
         ("請假衝突", "無衝突" if not absence_conflicts else f"{absence_conflicts} 筆衝突", not absence_conflicts),
+        ("休息間隔", "正常" if not violations else f"{len(violations)} 項警示", not violations),
         ("班表狀態", "已產生" if not schedule.empty else "待產生", not schedule.empty),
     ]
     items = "".join(f'<div class="health-item {"health-ok" if ok else "health-warn"}"><strong>{escape(label)} · {escape(status)}</strong><span>{"可直接執行" if ok else "建議立即處理"}</span></div>' for label, status, ok in checks)
@@ -686,7 +718,8 @@ def main() -> None:
         with overview_right:
             next_action = "先產生本週班表" if st.session_state.schedule.empty else "檢查尖峰與缺口"
             st.markdown(f'<div class="panel-card"><div class="section-title" style="margin-top:0">下一步建議</div><div class="kpi-detail">{next_action}</div><div style="margin-top:.75rem;color:#475467;font-size:.82rem;line-height:1.6">從左側設定需求與突發狀況，再到「自動排班」執行並檢查結果。</div></div>', unsafe_allow_html=True)
-        render_health_panel(st.session_state.schedule, st.session_state.gaps, max_hours, absences)
+        current_schedule = st.session_state.pending_schedule if not st.session_state.pending_schedule.empty else st.session_state.schedule
+        render_health_panel(current_schedule, st.session_state.gaps, max_hours, absences, audit_schedule(current_schedule, max_hours))
         render_leave_workflow(current_user)
 
     with tabs[1]:

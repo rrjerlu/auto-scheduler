@@ -73,6 +73,20 @@ def init_db() -> None:
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY(store_id) REFERENCES stores(id) ON DELETE CASCADE
             );
+            CREATE TABLE IF NOT EXISTS swap_requests (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                store_id INTEGER NOT NULL,
+                requester TEXT NOT NULL,
+                from_employee TEXT NOT NULL,
+                to_employee TEXT NOT NULL,
+                shift_date TEXT NOT NULL,
+                shift_name TEXT NOT NULL,
+                reason TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'approved', 'rejected')),
+                reviewed_by TEXT,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY(store_id) REFERENCES stores(id) ON DELETE CASCADE
+            );
             """
         )
         connection.execute("INSERT OR IGNORE INTO stores (name) VALUES (?)", ("示範門市",))
@@ -132,6 +146,29 @@ def review_leave_request(request_id: int, reviewer: str, status: str) -> None:
     init_db()
     with _connect() as connection:
         connection.execute("UPDATE leave_requests SET status = ?, reviewed_by = ? WHERE id = ?", (status, reviewer, request_id))
+
+
+def create_swap_request(store_id: int, requester: str, from_employee: str, to_employee: str, shift_date: str, shift_name: str, reason: str) -> None:
+    init_db()
+    with _connect() as connection:
+        connection.execute(
+            "INSERT INTO swap_requests (store_id, requester, from_employee, to_employee, shift_date, shift_name, reason) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (store_id, requester, from_employee, to_employee, shift_date, shift_name, reason),
+        )
+
+
+def list_swap_requests(store_id: int) -> list[dict[str, Any]]:
+    init_db()
+    with _connect() as connection:
+        return [dict(row) for row in connection.execute("SELECT * FROM swap_requests WHERE store_id = ? ORDER BY id DESC", (store_id,))]
+
+
+def review_swap_request(request_id: int, reviewer: str, status: str) -> None:
+    if status not in {"approved", "rejected"}:
+        raise ValueError("Invalid swap request status")
+    init_db()
+    with _connect() as connection:
+        connection.execute("UPDATE swap_requests SET status = ?, reviewed_by = ? WHERE id = ?", (status, reviewer, request_id))
 
 
 def list_stores() -> list[dict[str, Any]]:

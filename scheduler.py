@@ -139,3 +139,28 @@ def generate_schedule(
 
     columns = ["date", "day", "employee", "shift", "time", "hours", "preference"]
     return pd.DataFrame(assignments, columns=columns), gaps
+
+
+def audit_schedule(schedule: pd.DataFrame, max_weekly_hours: float = 40, min_rest_hours: float = 11) -> list[dict[str, str]]:
+    """Return explainable labor-rule warnings for an existing schedule."""
+    if schedule.empty:
+        return []
+    violations: list[dict[str, str]] = []
+    hours = schedule.groupby("employee")["hours"].sum()
+    for employee, total_hours in hours.items():
+        if total_hours > max_weekly_hours:
+            violations.append({"type": "工時", "employee": str(employee), "message": f"本週 {total_hours:.1f} 小時，超過上限 {max_weekly_hours:.1f} 小時"})
+
+    working = schedule.copy()
+    working["start_at"] = pd.to_datetime(working["date"] + " " + working["time"].str.split(" - ").str[0])
+    working["end_at"] = pd.to_datetime(working["date"] + " " + working["time"].str.split(" - ").str[1])
+    for employee, rows in working.sort_values("start_at").groupby("employee"):
+        rows = rows.sort_values("start_at")
+        previous = None
+        for _, row in rows.iterrows():
+            if previous is not None:
+                rest_hours = (row["start_at"] - previous["end_at"]).total_seconds() / 3600
+                if rest_hours < min_rest_hours:
+                    violations.append({"type": "休息", "employee": str(employee), "message": f"{previous['date']} 後僅休息 {rest_hours:.1f} 小時，低於 {min_rest_hours:.0f} 小時"})
+            previous = row
+    return violations
