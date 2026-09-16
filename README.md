@@ -43,6 +43,16 @@ streamlit run app.py
 
 通知介面位於 `notifications.py`，不會把密碼寫入程式。部署到 Streamlit Cloud 後，請在 App settings → Secrets 填入 `.env.example` 中的 SMTP 與 LINE 變數。SMTP 建議使用 App Password；LINE 使用 Messaging API Channel Access Token。未設定時，排班核心仍可正常運作，只會回報通知尚未設定。
 
+### LINE 官方客服 webhook
+
+`line_bot.py` 提供 LINE Messaging API webhook，支援選單、班表指引、請假指引、換班指引與轉接主管。它需要部署在可接收 POST 的服務（例如 Render、Railway 或 Cloud Run），啟動命令為：
+
+```bash
+uvicorn line_bot:app --host 0.0.0.0 --port 8000
+```
+
+LINE Developers Console 的 Webhook URL 設為 `https://你的網域/line/webhook`，並在部署平台設定 `LINE_CHANNEL_SECRET` 與 `LINE_CHANNEL_ACCESS_TOKEN`。Streamlit Cloud 主要用來跑前端，不適合直接承擔 LINE webhook server。
+
 ### Supabase 雲端資料庫
 
 `supabase_schema.sql` 是雲端資料庫初始 schema，請在 Supabase SQL Editor 執行。完成後再將 `SUPABASE_URL` 與 `SUPABASE_KEY` 放入 Streamlit Secrets；正式切換雲端持久化前，需把本機 SQLite 資料匯入 Supabase 並確認 RLS policy。
