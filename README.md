@@ -37,6 +37,20 @@ streamlit run app.py
 
 啟動後開啟終端機顯示的網址，通常是 `http://localhost:8501`。
 
+## 正式部署設定
+
+### Email／LINE 通知
+
+通知介面位於 `notifications.py`，不會把密碼寫入程式。部署到 Streamlit Cloud 後，請在 App settings → Secrets 填入 `.env.example` 中的 SMTP 與 LINE 變數。SMTP 建議使用 App Password；LINE 使用 Messaging API Channel Access Token。未設定時，排班核心仍可正常運作，只會回報通知尚未設定。
+
+### Supabase 雲端資料庫
+
+`supabase_schema.sql` 是雲端資料庫初始 schema，請在 Supabase SQL Editor 執行。完成後再將 `SUPABASE_URL` 與 `SUPABASE_KEY` 放入 Streamlit Secrets；正式切換雲端持久化前，需把本機 SQLite 資料匯入 Supabase 並確認 RLS policy。
+
+### 網域與資安
+
+Streamlit Cloud 的公開網址可直接使用；自訂網域需在網域 DNS 設定 CNAME 指向 Streamlit Cloud 提供的目標。正式上線前請更換示範密碼、啟用 GitHub／Streamlit MFA、限制 Supabase RLS、不要將 `.env`、`shiftwise.db` 或任何 Token 提交到 GitHub。
+
 ## 使用流程
 
 1. 在左側設定排班週、每週最高工時、連續上班上限、班別時間與每日需求人數。
